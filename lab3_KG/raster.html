@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Растеризация — лабораторная (итоговая версия)</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #222; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #666; margin-bottom: 16px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px;
+              background: #fff; padding: 12px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+  label { display: flex; flex-direction: column; font-size: 12px; }
+  input, select, button { font-size: 14px; padding: 4px 6px; }
+  button { cursor: pointer; padding: 6px 14px; }
+  canvas { background: #fff; border: 1px solid #999; image-rendering: pixelated; display: block; }
+  .grid { display: flex; gap: 20px; flex-wrap: wrap; }
+  .panel { background: #fff; padding: 12px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+  .panel.wide { width: 100%; }
+  .caption { font-size: 13px; margin-bottom: 6px; font-weight: bold; }
+  .info { font-size: 12px; color: #555; margin-top: 6px; max-width: 460px; line-height: 1.45; }
+  .divider { width: 100%; border-top: 1px dashed #bbb; margin: 4px 0; }
+  .trace { border-collapse: collapse; font-size: 11px; margin-top: 8px; }
+  .trace th, .trace td { border: 1px solid #ccc; padding: 2px 6px; text-align: center; white-space: nowrap; }
+  .trace th { background: #eee; }
+  .trace-wrap { max-height: 260px; overflow: auto; margin-top: 6px; }
+  .legend span { margin-right: 10px; font-size: 12px; }
+  .badge { display:inline-block; padding: 1px 6px; border-radius: 4px; color:#fff; font-size:11px; }
+</style>
+</head>
+<body>
+
+<h1>Лабораторная: базовые растровые алгоритмы</h1>
+<div class="subtitle">
+  DDA · Брезенхем · Кастл-Питвей · Пошаговый алгоритм · Окружность Брезенхема ·
+  Целочисленные и дробные концы · Трассировка · Временные характеристики
+</div>
+
+<!-- ================= ПАНЕЛЬ УПРАВЛЕНИЯ ================= -->
+<div class="controls">
+  <label>X1 <input id="x1" type="number" value="1" min="0" max="39"></label>
+  <label>Y1 <input id="y1" type="number" value="1" min="0" max="39"></label>
+  <label>X2 <input id="x2" type="number" value="6" min="0" max="39"></label>
+  <label>Y2 <input id="y2" type="number" value="4" min="0" max="39"></label>
+  <label>R (окружность) <input id="r" type="number" value="10" min="1" max="19"></label>
+
+  <div class="divider"></div>
+
+  <label>X1' (дробный) <input id="fx1" type="number" step="0.1" value="1.3" min="0" max="39"></label>
+  <label>Y1' (дробный) <input id="fy1" type="number" step="0.1" value="2.7" min="0" max="39"></label>
+  <label>X2' (дробный) <input id="fx2" type="number" step="0.1" value="14.6" min="0" max="39"></label>
+  <label>Y2' (дробный) <input id="fy2" type="number" step="0.1" value="9.2" min="0" max="39"></label>
+  <label style="flex-direction:row; align-items:center; gap:6px; padding-bottom:4px;">
+    <input id="aa" type="checkbox" checked> антиалиасинг
+  </label>
+
+  <label>Масштаб
+    <input id="zoom" type="range" min="6" max="24" value="10"
+           oninput="CELL=+this.value; drawAll();">
+  </label>
+
+  <button onclick="drawAll()">Построить</button>
+  <button onclick="randomize()">Случайно</button>
+</div>
+
+<!-- ================= ПАНЕЛИ АЛГОРИТМОВ ================= -->
+<div class="grid">
+
+  <!-- 1. DDA -->
+  <div class="panel">
+    <div class="caption">1. DDA (цифровой дифференциальный анализатор)</div>
+    <canvas id="cDda" width="400" height="400"></canvas>
+    <div class="info">Вещественное накопление шага. 8-связная линия.</div>
+    <div class="trace-wrap" id="traceDda"></div>
+  </div>
+
+  <!-- 2. Брезенхем -->
+  <div class="panel">
+    <div class="caption">2. Алгоритм Брезенхема (отрезок)</div>
+    <canvas id="cBres" width="400" height="400"></canvas>
+    <div class="info">Только целочисленная арифметика. 8-связная линия.</div>
+    <div class="trace-wrap" id="traceBres"></div>
+  </div>
+
+  <!-- 3. Кастл-Питвей -->
+  <div class="panel">
+    <div class="caption">3. Алгоритм Кастла-Питвея</div>
+    <canvas id="cCastle" width="400" height="400"></canvas>
+    <div class="info">Выбор пикселя по знаку дискриминанта F(x,y)=ax+by+c.</div>
+    <div class="trace-wrap" id="traceCastle"></div>
+  </div>
+
+  <!-- 4. Окружность -->
+  <div class="panel">
+    <div class="caption">4. Окружность — алгоритм Брезенхема</div>
+    <canvas id="cCircle" width="400" height="400"></canvas>
+    <div class="info">8-кратная симметрия, целочисленный дискриминант d.</div>
+    <div class="trace-wrap" id="traceCircle"></div>
+  </div>
+
+  <!-- 5. Сравнение -->
+  <div class="panel">
+    <div class="caption">5. Сравнение всех методов с идеальной линией</div>
+    <canvas id="cCompare" width="400" height="400"></canvas>
+    <div class="info legend">
+      <span><span class="badge" style="background:#e6194b">DDA</span></span>
+      <span><span class="badge" style="background:#3cb44b">Брезенхем</span></span>
+      <span><span class="badge" style="background:#4363d8">Кастл-Питвей</span></span>
+      <span><span class="badge" style="background:#f58231">Пошаговый</span></span>
+      <span style="color:#e00">— идеальная линия</span>
+    </div>
+  </div>
+
+  <!-- 6. Пошаговый -->
+  <div class="panel">
+    <div class="caption">6. Пошаговый алгоритм y = kx + b</div>
+    <canvas id="cStep" width="400" height="400"></canvas>
+    <div class="info">Вещественная арифметика, произведение k·x и округление — медленно.</div>
+    <div class="trace-wrap" id="traceStep"></div>
+  </div>
+
+  <!-- 7. Дробные концы -->
+  <div class="panel">
+    <div class="caption">7. Нецелочисленные концы + антиалиасинг</div>
+    <canvas id="cAA" width="400" height="400"></canvas>
+    <div class="info">
+      Дробные координаты концов. Интенсивность пикселя ~ площади покрытия.
+      Снимите галочку «антиалиасинг», чтобы увидеть бинарный вариант.
+    </div>
+  </div>
+
+  <!-- 8. Тайминг -->
+  <div class="panel wide">
+    <div class="caption">8. Временные характеристики (10 000 прогонов, среднее)</div>
+    <button onclick="measureAll()">Замерить</button>
+    <div id="timing" style="margin-top:8px;"></div>
+  </div>
+
+  <!-- 9. Привязка координат -->
+  <div class="panel wide">
+    <div class="caption">9. Привязка целочисленных координат к дискретной сетке</div>
+    <div class="info" style="max-width:100%">
+      Каждый пиксель — квадрат со стороной <b>CELL</b> px на canvas (меняется слайдером «Масштаб»).
+      Пиксель с целочисленными координатами (x, y) занимает область
+      <b>[x·CELL, (x+1)·CELL] × [y·CELL, (y+1)·CELL]</b>.
+      Центр пикселя — (x+0.5, y+0.5). Ось X направлена вправо, ось Y — вверх
+      (на canvas ось Y инвертирована: y_canvas = (SIZE−1−y)·CELL).
+      Алгоритмы работают с целочисленными индексами (x, y) — это и есть
+      «целочисленные координаты концов» из лекции (стр. 15).
+    </div>
+  </div>
+
+</div>
+
+<script>
+const SIZE = 40;
+let CELL = 10;
+
+/* ================= БАЗОВЫЕ ФУНКЦИИ РИСОВАНИЯ ================= */
+function setupCanvas(canvas) {
+  const ctx = canvas.getContext('2d');
+  canvas.width = SIZE * CELL;
+  canvas.height = SIZE * CELL;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // сетка
+  ctx.strokeStyle = '#e0e0e0';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= SIZE; i++) {
+    ctx.beginPath(); ctx.moveTo(i * CELL, 0); ctx.lineTo(i * CELL, canvas.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i * CELL); ctx.lineTo(canvas.width, i * CELL); ctx.stroke();
+  }
+
+  // оси
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, canvas.height - 1); ctx.lineTo(canvas.width, canvas.height - 1); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(1, 0); ctx.lineTo(1, canvas.height); ctx.stroke();
+
+  // подписи каждые 5
+  ctx.fillStyle = '#000';
+  ctx.font = '10px Arial';
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= SIZE; i += 5) {
+    ctx.fillText(i, i * CELL, canvas.height - 4);
+    ctx.fillText(i, 12, canvas.height - i * CELL - 2);
+  }
+  ctx.font = 'bold 12px Arial';
+  ctx.fillText('X', canvas.width - 14, canvas.height - 14);
+  ctx.fillText('Y', 14, 14);
+
+  return ctx;
+}
+
+function drawPixel(ctx, x, y, color = '#000') {
+  if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return;
+  ctx.fillStyle = color;
+  // ось Y инвертирована: рисуем пиксель с координатой y снизу
+  ctx.fillRect(x * CELL, (SIZE - 1 - y) * CELL, CELL, CELL);
+}
+
+/* ================= 1. DDA ================= */
+function dda(x1, y1, x2, y2) {
+  const pts = [];
+  const dx = x2 - x1, dy = y2 - y1;
+  const steps = Math.max(Math.abs(dx), Math.abs(dy));
+  if (steps === 0) return [[x1, y1]];
+  const xInc = dx / steps, yInc = dy / steps;
+  let x = x1, y = y1;
+  for (let i = 0; i <= steps; i++) {
+    pts.push([Math.round(x), Math.round(y)]);
+    x += xInc; y += yInc;
+  }
+  return pts;
+}
+
+function ddaTrace(x1, y1, x2, y2) {
+  const log = [];
+  const dx = x2 - x1, dy = y2 - y1;
+  const steps = Math.max(Math.abs(dx), Math.abs(dy));
+  const xInc = dx / steps, yInc = dy / steps;
+  let x = x1, y = y1;
+  for (let i = 0; i <= steps; i++) {
+    log.push({ i, x: x.toFixed(2), y: y.toFixed(2),
+               rx: Math.round(x), ry: Math.round(y) });
+    x += xInc; y += yInc;
+  }
+  return log;
+}
+
+/* ================= 2. Брезенхем ================= */
+function bresenham(x1, y1, x2, y2) {
+  const pts = [];
+  let dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+  const sx = x2 > x1 ? 1 : -1, sy = y2 > y1 ? 1 : -1;
+  let err = dx - dy, x = x1, y = y1;
+  while (true) {
+    pts.push([x, y]);
+    if (x === x2 && y === y2) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x += sx; }
+    if (e2 <  dx) { err += dx; y += sy; }
+  }
+  return pts;
+}
+
+function bresenhamTrace(x1, y1, x2, y2) {
+  const log = [];
+  let dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+  const sx = x2 > x1 ? 1 : -1, sy = y2 > y1 ? 1 : -1;
+  let err = dx - dy, x = x1, y = y1, i = 0;
+  while (true) {
+    const e2 = 2 * err;
+    let decision = '—';
+    log.push({ i, x, y, err, e2, decision });
+    if (x === x2 && y === y2) break;
+    const moves = [];
+    if (e2 > -dy) { err -= dy; x += sx; moves.push('x+=sx'); }
+    if (e2 <  dx) { err += dx; y += sy; moves.push('y+=sy'); }
+    log[log.length - 1].decision = moves.join(', ') || '—';
+    i++;
+  }
+  return log;
+}
+
+/* ================= 3. Кастл-Питвей ================= */
+function castlePitteway(x1, y1, x2, y2) {
+  const pts = [];
+  const a = y1 - y2, b = x2 - x1, c = x1 * y2 - x2 * y1;
+  const sx = x2 > x1 ? 1 : -1, sy = y2 > y1 ? 1 : -1;
+  let x = x1, y = y1;
+  pts.push([x, y]);
+  const useX = Math.abs(x2 - x1) >= Math.abs(y2 - y1);
+  let guard = 0;
+  while (x !== x2 || y !== y2) {
+    if (++guard > SIZE * SIZE * 4) break;
+    if (useX) {
+      const nx = x + sx;
+      const midF = a * nx + b * (y + sy * 0.5) + c;
+      x = nx;
+      if ((a < 0 && midF < 0) || (a > 0 && midF > 0)) {
+        if (y !== y2) y += sy;
+      }
+    } else {
+      const ny = y + sy;
+      const midF = a * (x + sx * 0.5) + b * ny + c;
+      y = ny;
+      if ((b < 0 && midF < 0) || (b > 0 && midF > 0)) {
+        if (x !== x2) x += sx;
+      }
+    }
+    pts.push([x, y]);
+  }
+  return pts;
+}
+
+function castlePittewayTrace(x1, y1, x2, y2) {
+  const log = [];
+  const a = y1 - y2, b = x2 - x1, c = x1 * y2 - x2 * y1;
+  const sx = x2 > x1 ? 1 : -1, sy = y2 > y1 ? 1 : -1;
+  let x = x1, y = y1, i = 0;
+  const useX = Math.abs(x2 - x1) >= Math.abs(y2 - y1);
+  log.push({ i, x, y, F: a * x + b * y + c, decision: 'старт' });
+  let guard = 0;
+  while (x !== x2 || y !== y2) {
+    if (++guard > SIZE * SIZE * 4) break;
+    if (useX) {
+      const nx = x + sx;
+      const midF = a * nx + b * (y + sy * 0.5) + c;
+      let dec = 'x+=sx';
+      x = nx;
+      if ((a < 0 && midF < 0) || (a > 0 && midF > 0)) {
+        if (y !== y2) { y += sy; dec += ', y+=sy'; }
+      }
+      i++;
+      log.push({ i, x, y, F: midF.toFixed(2), decision: dec });
+    } else {
+      const ny = y + sy;
+      const midF = a * (x + sx * 0.5) + b * ny + c;
+      let dec = 'y+=sy';
+      y = ny;
+      if ((b < 0 && midF < 0) || (b > 0 && midF > 0)) {
+        if (x !== x2) { x += sx; dec += ', x+=sx'; }
+      }
+      i++;
+      log.push({ i, x, y, F: midF.toFixed(2), decision: dec });
+    }
+  }
+  return log;
+}
+
+/* ================= 4. Окружность Брезенхема ================= */
+function circleBresenham(cx, cy, r) {
+  const pts = [];
+  const plot8 = (x, y) => {
+    pts.push([cx + x, cy + y], [cx - x, cy + y],
+             [cx + x, cy - y], [cx - x, cy - y],
+             [cx + y, cy + x], [cx - y, cy + x],
+             [cx + y, cy - x], [cx - y, cy - x]);
+  };
+  let x = 0, y = r, d = 3 - 2 * r;
+  while (x <= y) {
+    plot8(x, y);
+    if (d < 0) {
+      d += 4 * x + 6;
+    } else {
+      d += 4 * (x - y) + 10;
+      y -= 1;
+    }
+    x += 1;
+  }
+  return pts;
+}
+
+function circleTrace(r) {
+  const log = [];
+  let x = 0, y = r, d = 3 - 2 * r, i = 0;
+  while (x <= y) {
+    log.push({ i, x, y, d, decision: d < 0 ? 'd+=4x+6' : 'd+=4(x−y)+10, y−=1' });
+    if (d < 0) {
+      d += 4 * x + 6;
+    } else {
+      d += 4 * (x - y) + 10;
+      y -= 1;
+    }
+    x += 1; i++;
+  }
+  return log;
+}
+
+/* ================= 6. Пошаговый ================= */
+function stepAlgorithm(x1, y1, x2, y2) {
+  const pts = [];
+  if (x1 === x2) {
+    const ymin = Math.min(y1, y2), ymax = Math.max(y1, y2);
+    for (let y = ymin; y <= ymax; y++) pts.push([x1, y]);
+    return pts;
+  }
+  const k = (y2 - y1) / (x2 - x1);
+  const b = y1 - k * x1;
+  const xmin = Math.min(x1, x2), xmax = Math.max(x1, x2);
+  for (let x = xmin; x <= xmax; x++) {
+    pts.push([x, Math.round(k * x + b)]);
+  }
+  return pts;
+}
+
+function stepTrace(x1, y1, x2, y2) {
+  const log = [];
+  if (x1 === x2) return log;
+  const k = (y2 - y1) / (x2 - x1);
+  const b = y1 - k * x1;
+  const xmin = Math.min(x1, x2), xmax = Math.max(x1, x2);
+  for (let x = xmin; x <= xmax; x++) {
+    const y = k * x + b;
+    log.push({ x, k: k.toFixed(3), b: b.toFixed(3),
+               y: y.toFixed(2), ry: Math.round(y) });
+  }
+  return log;
+}
+
+/* ================= ОТРИСОВКА ================= */
+function drawPoints(canvasId, pts, color = '#000') {
+  const canvas = document.getElementById(canvasId);
+  const ctx = setupCanvas(canvas);
+  pts.forEach(([x, y]) => drawPixel(ctx, x, y, color));
+  return ctx;
+}
+
+function drawCompare(x1, y1, x2, y2) {
+  const canvas = document.getElementById('cCompare');
+  const ctx = setupCanvas(canvas);
+
+  // идеальная линия
+  ctx.strokeStyle = '#e00';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x1 * CELL + CELL / 2, (SIZE - 1 - y1) * CELL + CELL / 2);
+  ctx.lineTo(x2 * CELL + CELL / 2, (SIZE - 1 - y2) * CELL + CELL / 2);
+  ctx.stroke();
+
+  const colors = { dda: '#e6194b', bres: '#3cb44b', castle: '#4363d8', step: '#f58231' };
+  const offsets = { dda: [-0.25, -0.25], bres: [0.25, -0.25],
+                    castle: [-0.25, 0.25], step: [0.25, 0.25] };
+
+  const drawMethod = (pts, color, off) => {
+    ctx.fillStyle = color;
+    pts.forEach(([x, y]) => {
+      if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return;
+      const cx = x * CELL + CELL / 2 + off[0] * CELL;
+      const cy = (SIZE - 1 - y) * CELL + CELL / 2 + off[1] * CELL;
+      ctx.beginPath();
+      ctx.arc(cx, cy, CELL * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  };
+
+  drawMethod(dda(x1, y1, x2, y2), colors.dda, offsets.dda);
+  drawMethod(bresenham(x1, y1, x2, y2), colors.bres, offsets.bres);
+  drawMethod(castlePitteway(x1, y1, x2, y2), colors.castle, offsets.castle);
+  drawMethod(stepAlgorithm(x1, y1, x2, y2), colors.step, offsets.step);
+}
+
+/* ================= 7. Антиалиасинг ================= */
+function drawAntiAliased(canvas, x1, y1, x2, y2, useAA) {
+  const ctx = setupCanvas(canvas);
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.hypot(dx, dy);
+  if (len === 0) return;
+  const nx = -dy / len, ny = dx / len;
+
+  for (let py = 0; py < SIZE; py++) {
+    for (let px = 0; px < SIZE; px++) {
+      const cx = px + 0.5, cy = py + 0.5;
+      const dist = Math.abs((cx - x1) * nx + (cy - y1) * ny);
+      const t = ((cx - x1) * dx + (cy - y1) * dy) / (len * len);
+      if (t < 0 || t > 1 || dist > 1) continue;
+      let cover = 1 - dist;
+      if (cover <= 0) continue;
+      if (!useAA) cover = cover > 0.5 ? 1 : 0;
+      if (cover <= 0) continue;
+      const g = Math.round(255 * (1 - cover));
+      ctx.fillStyle = `rgb(${g},${g},${g})`;
+      ctx.fillRect(px * CELL, (SIZE - 1 - py) * CELL, CELL, CELL);
+    }
+  }
+}
+
+/* ================= ТАБЛИЦЫ ТРАССИРОВКИ ================= */
+function renderTrace(containerId, log, columns) {
+  if (!log.length) { document.getElementById(containerId).innerHTML = ''; return; }
+  let html = '<table class="trace"><tr>' +
+    columns.map(c => `<th>${c}</th>`).join('') + '</tr>';
+  log.forEach(row => {
+    html += '<tr>' + columns.map(c => `<td>${row[c] ?? ''}</td>`).join('') + '</tr>';
+  });
+  html += '</table>';
+  document.getElementById(containerId).innerHTML = html;
+}
+
+/* ================= ВРЕМЕННЫЕ ХАРАКТЕРИСТИКИ ================= */
+function measure(fn, ...args) {
+  const N = 10000;
+  const t0 = performance.now();
+  let pts;
+  for (let i = 0; i < N; i++) pts = fn(...args);
+  const t1 = performance.now();
+  return { ms: (t1 - t0) / N, pts };
+}
+
+function measureAll() {
+  const x1 = +document.getElementById('x1').value;
+  const y1 = +document.getElementById('y1').value;
+  const x2 = +document.getElementById('x2').value;
+  const y2 = +document.getElementById('y2').value;
+  const r  = +document.getElementById('r').value;
+  const cx = Math.floor(SIZE / 2), cy = Math.floor(SIZE / 2);
+
+  const results = [
+    ['DDA',            measure(dda, x1, y1, x2, y2)],
+    ['Брезенхем',      measure(bresenham, x1, y1, x2, y2)],
+    ['Кастл-Питвей',   measure(castlePitteway, x1, y1, x2, y2)],
+    ['Пошаговый',      measure(stepAlgorithm, x1, y1, x2, y2)],
+    ['Окружность Бр.', measure(circleBresenham, cx, cy, r)],
+  ];
+
+  let html = '<table class="trace"><tr>' +
+    '<th>Алгоритм</th><th>Точек</th><th>Время, мс (среднее за 10 000 прогонов)</th></tr>';
+  results.forEach(([name, res]) => {
+    html += `<tr><td>${name}</td><td>${res.pts.length}</td><td>${res.ms.toFixed(6)}</td></tr>`;
+  });
+  html += '</table>' +
+    '<div class="info" style="margin-top:6px">' +
+    'Измерения относительные: время в браузере зависит от JIT-компиляции. ' +
+    'Для отчёта важны соотношения между алгоритмами на одном и том же отрезке.' +
+    '</div>';
+  document.getElementById('timing').innerHTML = html;
+}
+
+/* ================= ОБЩАЯ ПЕРЕРИСОВКА ================= */
+function drawAll() {
+  const x1 = +document.getElementById('x1').value;
+  const y1 = +document.getElementById('y1').value;
+  const x2 = +document.getElementById('x2').value;
+  const y2 = +document.getElementById('y2').value;
+  const r  = +document.getElementById('r').value;
+
+  drawPoints('cDda',    dda(x1, y1, x2, y2));
+  drawPoints('cBres',   bresenham(x1, y1, x2, y2));
+  drawPoints('cCastle', castlePitteway(x1, y1, x2, y2));
+
+  const cx = Math.floor(SIZE / 2), cy = Math.floor(SIZE / 2);
+  drawPoints('cCircle', circleBresenham(cx, cy, r));
+
+  drawCompare(x1, y1, x2, y2);
+
+  drawPoints('cStep', stepAlgorithm(x1, y1, x2, y2));
+
+  const fx1 = +document.getElementById('fx1').value;
+  const fy1 = +document.getElementById('fy1').value;
+  const fx2 = +document.getElementById('fx2').value;
+  const fy2 = +document.getElementById('fy2').value;
+  const useAA = document.getElementById('aa').checked;
+  drawAntiAliased(document.getElementById('cAA'), fx1, fy1, fx2, fy2, useAA);
+
+  // трассировка
+  renderTrace('traceDda', ddaTrace(x1, y1, x2, y2),
+    ['i', 'x', 'y', 'rx', 'ry']);
+  renderTrace('traceBres', bresenhamTrace(x1, y1, x2, y2),
+    ['i', 'x', 'y', 'err', 'e2', 'decision']);
+  renderTrace('traceCastle', castlePittewayTrace(x1, y1, x2, y2),
+    ['i', 'x', 'y', 'F', 'decision']);
+  renderTrace('traceCircle', circleTrace(r),
+    ['i', 'x', 'y', 'd', 'decision']);
+  renderTrace('traceStep', stepTrace(x1, y1, x2, y2),
+    ['x', 'k', 'b', 'y', 'ry']);
+}
+
+function randomize() {
+  const rnd = (n) => Math.floor(Math.random() * n);
+  document.getElementById('x1').value = rnd(SIZE);
+  document.getElementById('y1').value = rnd(SIZE);
+  document.getElementById('x2').value = rnd(SIZE);
+  document.getElementById('y2').value = rnd(SIZE);
+  document.getElementById('r').value  = 2 + rnd(SIZE / 2 - 2);
+  const rndF = () => (Math.random() * SIZE).toFixed(1);
+  document.getElementById('fx1').value = rndF();
+  document.getElementById('fy1').value = rndF();
+  document.getElementById('fx2').value = rndF();
+  document.getElementById('fy2').value = rndF();
+  drawAll();
+}
+
+/* ================= СТАРТ ================= */
+drawAll();
+</script>
+</body>
+</html>
